@@ -484,15 +484,16 @@ TEST_F(MacroAssemblerTest, CountTrailingZerosU64) {
 }
 
 // ---------------------------------------------------------------------------
-// Float conversions — ConvertIntToFloat / ConvertDoubleToInt64
+// Float conversions — ConvertIntToDouble / ConvertIntToFloat /
+// ConvertDoubleToInt64
 // ---------------------------------------------------------------------------
 
-TEST_F(MacroAssemblerTest, ConvertIntToFloat) {
-  // Converts int32 in r2 to float64 in d0, then reads it back.
+TEST_F(MacroAssemblerTest, ConvertIntToDouble) {
+  // Loads int32 T::input, converts it to float64 in d0, stores T::output.
   struct T {
     int32_t input;
     double output;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -515,12 +516,43 @@ TEST_F(MacroAssemblerTest, ConvertIntToFloat) {
   t.input = 1000;  t.output = -1.0; f.Call(&t); CHECK_EQ(1000.0, t.output);
 }
 
+TEST_F(MacroAssemblerTest, ConvertIntToFloat) {
+  // Loads int32 T::input, converts it to float32 in d0, stores T::output.
+  struct T {
+    int32_t input;
+    float output;
+  } t = {};
+  auto buffer = AllocateAssemblerBuffer();
+  MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
+                      buffer->CreateView());
+  __ set_root_array_available(false);
+  __ set_abort_hard(true);
+  // r2 = pointer to T
+  __ LoadS32(r3, MemOperand(r2, offsetof(T, input)));
+  __ ConvertIntToFloat(d0, r3);
+  __ StoreF32(d0, MemOperand(r2, offsetof(T, output)));
+  __ Ret();
+  CodeDesc desc;
+  masm.GetCode(isolate(), &desc);
+  buffer->MakeExecutable();
+  using F = void*(void*);
+  auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
+
+  t.input = 0;     t.output = -1.0f; f.Call(&t); CHECK_EQ(0.0f,  t.output);
+  t.input = 42;    t.output = -1.0f; f.Call(&t); CHECK_EQ(42.0f, t.output);
+  t.input = -42;   t.output = -1.0f; f.Call(&t); CHECK_EQ(-42.0f, t.output);
+  t.input = 1000;  t.output = -1.0f; f.Call(&t); CHECK_EQ(1000.0f, t.output);
+  // 2^24 + 1 is not representable as float32; rounds to nearest even (2^24).
+  t.input = 16777217; t.output = -1.0f; f.Call(&t);
+  CHECK_EQ(16777216.0f, t.output);
+}
+
 TEST_F(MacroAssemblerTest, ConvertDoubleToInt64) {
   // Converts double in d0 to int64 in r2 (truncate toward zero).
   struct T {
     double input;
     int64_t output;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -537,11 +569,12 @@ TEST_F(MacroAssemblerTest, ConvertDoubleToInt64) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  t.input = 0.0;    f.Call(&t); CHECK_EQ(0LL,   t.output);
-  t.input = 1.7;    f.Call(&t); CHECK_EQ(1LL,   t.output);
-  t.input = -1.7;   f.Call(&t); CHECK_EQ(-1LL,  t.output);
-  t.input = 100.9;  f.Call(&t); CHECK_EQ(100LL, t.output);
-  t.input = -100.9; f.Call(&t); CHECK_EQ(-100LL, t.output);
+  t.input = 0.0;    t.output = INT64_MIN; f.Call(&t); CHECK_EQ(0LL,   t.output);
+  t.input = 1.7;    t.output = INT64_MIN; f.Call(&t); CHECK_EQ(1LL,   t.output);
+  t.input = -1.7;   t.output = INT64_MIN; f.Call(&t); CHECK_EQ(-1LL,  t.output);
+  t.input = 100.9;  t.output = INT64_MIN; f.Call(&t); CHECK_EQ(100LL, t.output);
+  t.input = -100.9; t.output = INT64_MIN; f.Call(&t);
+  CHECK_EQ(-100LL, t.output);
 }
 
 // ---------------------------------------------------------------------------
@@ -791,7 +824,7 @@ TEST_F(MacroAssemblerTest, I32x4Splat) {
     int32_t lane1;
     int32_t lane2;
     int32_t lane3;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -833,7 +866,7 @@ TEST_F(MacroAssemblerTest, I64x2Splat) {
     int64_t input;
     int64_t lane0;
     int64_t lane1;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -864,7 +897,7 @@ TEST_F(MacroAssemblerTest, I16x8Splat) {
     int16_t lane0;
     int16_t lane4;
     int16_t lane7;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -900,7 +933,7 @@ TEST_F(MacroAssemblerTest, I32x4ReplaceLane) {
   struct T {
     int32_t val;
     int32_t extracted;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1051,7 +1084,7 @@ TEST_F(MacroAssemblerTest, Shifts32) {
                       buffer->CreateView());
   __ set_root_array_available(false);
   __ set_abort_hard(true);
-  // r2 = value, r3 = shift amount; return (val << 3) >> 1
+  // r2 = value; return (val << 3) >> 1
   __ ShiftLeftU32(r2, r2, Operand(3));
   __ ShiftRightU32(r2, r2, Operand(1));
   __ Ret();
@@ -1083,7 +1116,7 @@ TEST_F(MacroAssemblerTest, ShiftRightS32) {
 }
 
 // ---------------------------------------------------------------------------
-// ShiftLeftU64 / ShiftRightU64 / ShiftRightS64
+// ShiftLeftU64 / ShiftRightS64 (immediate)
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, Shifts64) {
@@ -1100,7 +1133,7 @@ TEST_F(MacroAssemblerTest, Shifts64) {
   auto f =
       GeneratedCode<int64_t, int64_t>::FromBuffer(isolate(), buffer->start());
   CHECK_EQ(16LL, f.Call(1));
-  CHECK_EQ(INT64_MIN, f.Call(0x0800000000000000LL));  // 1<<63
+  CHECK_EQ(INT64_MIN, f.Call(0x0800000000000000LL));  // (1<<59)<<4 = 1<<63
 }
 
 TEST_F(MacroAssemblerTest, ShiftRightS64) {
@@ -1172,11 +1205,11 @@ TEST_F(MacroAssemblerTest, LoadS32SignExtend) {
 }
 
 // ---------------------------------------------------------------------------
-// ConvertFloat32ToInt32 / ConvertFloat32ToInt64
+// ConvertFloat32ToInt32
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, ConvertFloat32ToInt32) {
-  struct T { float input; int32_t output; } t;
+  struct T { float input; int32_t output; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1192,9 +1225,9 @@ TEST_F(MacroAssemblerTest, ConvertFloat32ToInt32) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  t.input = 3.9f;  f.Call(&t); CHECK_EQ(3, t.output);
-  t.input = -3.9f; f.Call(&t); CHECK_EQ(-3, t.output);
-  t.input = 0.0f;  f.Call(&t); CHECK_EQ(0, t.output);
+  t.input = 3.9f;  t.output = INT32_MIN; f.Call(&t); CHECK_EQ(3, t.output);
+  t.input = -3.9f; t.output = INT32_MIN; f.Call(&t); CHECK_EQ(-3, t.output);
+  t.input = 0.0f;  t.output = INT32_MIN; f.Call(&t); CHECK_EQ(0, t.output);
 }
 
 // ---------------------------------------------------------------------------
@@ -1202,7 +1235,7 @@ TEST_F(MacroAssemblerTest, ConvertFloat32ToInt32) {
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, ConvertDoubleToFloat32) {
-  struct T { double input; float output; } t;
+  struct T { double input; float output; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1218,8 +1251,8 @@ TEST_F(MacroAssemblerTest, ConvertDoubleToFloat32) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  t.input = 1.5;  f.Call(&t); CHECK_EQ(1.5f, t.output);
-  t.input = -2.0; f.Call(&t); CHECK_EQ(-2.0f, t.output);
+  t.input = 1.5;  t.output = -1.0f; f.Call(&t); CHECK_EQ(1.5f, t.output);
+  t.input = -2.0; t.output = -1.0f; f.Call(&t); CHECK_EQ(-2.0f, t.output);
 }
 
 // ---------------------------------------------------------------------------
@@ -1227,7 +1260,7 @@ TEST_F(MacroAssemblerTest, ConvertDoubleToFloat32) {
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, ConvertFloat32ToDouble) {
-  struct T { float input; double output; } t;
+  struct T { float input; double output; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1243,7 +1276,7 @@ TEST_F(MacroAssemblerTest, ConvertFloat32ToDouble) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  t.input = 3.14f; f.Call(&t);
+  t.input = 3.14f; t.output = -1.0; f.Call(&t);
   CHECK_EQ(static_cast<double>(3.14f), t.output);
 }
 
@@ -1292,11 +1325,11 @@ TEST_F(MacroAssemblerTest, AddSubImmediate64) {
 }
 
 // ---------------------------------------------------------------------------
-// AbsF32 / AbsF64
+// LoadPositive / LoadNegative on floats (lpdbr, lndbr, lpebr, lnebr)
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, AbsFloat) {
-  struct T { double d_in, d_out; float f_in, f_out; } t;
+  struct T { double d_in, d_out; float f_in, f_out; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1318,17 +1351,18 @@ TEST_F(MacroAssemblerTest, AbsFloat) {
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
   t.d_in = 3.0; t.f_in = -2.0f;
+  t.d_out = -1.0; t.f_out = -1.0f;
   f.Call(&t);
   CHECK_EQ(3.0,  t.d_out);
   CHECK_EQ(2.0f, t.f_out);
 }
 
 // ---------------------------------------------------------------------------
-// MaxF64 / MinF64
+// DoubleMax / DoubleMin
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, MaxMinF64) {
-  struct T { double a, b, mx, mn; } t;
+  struct T { double a, b, mx, mn; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1348,11 +1382,13 @@ TEST_F(MacroAssemblerTest, MaxMinF64) {
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
   t.a = 3.0; t.b = 7.0;
+  t.mx = t.mn = -100.0;
   f.Call(&t);
   CHECK_EQ(7.0, t.mx);
   CHECK_EQ(3.0, t.mn);
 
   t.a = -1.0; t.b = 0.0;
+  t.mx = t.mn = -100.0;
   f.Call(&t);
   CHECK_EQ(0.0,  t.mx);
   CHECK_EQ(-1.0, t.mn);
@@ -1363,7 +1399,7 @@ TEST_F(MacroAssemblerTest, MaxMinF64) {
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, I8x16Splat) {
-  struct T { int32_t input; int32_t lane0, lane7, lane15; } t;
+  struct T { int32_t input; int32_t lane0, lane7, lane15; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1396,7 +1432,7 @@ TEST_F(MacroAssemblerTest, I8x16Splat) {
 // ---------------------------------------------------------------------------
 
 TEST_F(MacroAssemblerTest, I64x2ReplaceLane) {
-  struct T { int64_t val; int64_t extracted; } t;
+  struct T { int64_t val; int64_t extracted; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -1506,7 +1542,7 @@ TEST_F(MacroAssemblerTest, AddSubS64Memory) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.a = 100;
   f.Call(&t);
   CHECK_EQ(107LL, t.result);  // 100 + 10 - 3 = 107
@@ -1603,7 +1639,7 @@ TEST_F(MacroAssemblerTest, FPArithF64) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.a = 2.0; t.b = 3.0;
   f.Call(&t);
   CHECK_EQ(8.0, t.result);  // 2*3 + 2 = 8
@@ -1630,7 +1666,7 @@ TEST_F(MacroAssemblerTest, FPArithF32) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.a = 1.5f; t.b = 2.5f;
   f.Call(&t);
   CHECK_EQ(4.0f, t.result);
@@ -1659,7 +1695,7 @@ TEST_F(MacroAssemblerTest, FPSubDiv) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.a = 10.0; t.b = 4.0;
   f.Call(&t);
   CHECK_EQ(6.0, t.sub_result);
@@ -1716,7 +1752,7 @@ TEST_F(MacroAssemblerTest, SwapFloat32Regs) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.a = 1.0f; t.b = 2.0f;
   f.Call(&t);
   CHECK_EQ(2.0f, t.a);
@@ -1745,7 +1781,7 @@ TEST_F(MacroAssemblerTest, SwapDoubleRegs) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.a = 1.5; t.b = 2.5;
   f.Call(&t);
   CHECK_EQ(2.5, t.a);
@@ -1775,7 +1811,7 @@ TEST_F(MacroAssemblerTest, I16x8ReplaceLane) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 0x1234;
   f.Call(&t);
   CHECK_EQ(0x1234LL, t.extracted);
@@ -1804,7 +1840,7 @@ TEST_F(MacroAssemblerTest, I8x16ReplaceLane) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 0xAB;
   f.Call(&t);
   CHECK_EQ(0xABLL, t.extracted);
@@ -1831,7 +1867,7 @@ TEST_F(MacroAssemblerTest, F64x2SplatExtract) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 3.14;
   f.Call(&t);
   CHECK_EQ(3.14, t.extracted);
@@ -1858,7 +1894,7 @@ TEST_F(MacroAssemblerTest, F32x4SplatExtract) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 2.5f;
   f.Call(&t);
   CHECK_EQ(2.5f, t.extracted);
@@ -1887,7 +1923,7 @@ TEST_F(MacroAssemblerTest, F64x2ReplaceLane) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 6.28;
   f.Call(&t);
   CHECK_EQ(6.28, t.extracted);
@@ -1916,7 +1952,7 @@ TEST_F(MacroAssemblerTest, F32x4ReplaceLane) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 1.25f;
   f.Call(&t);
   CHECK_EQ(1.25f, t.extracted);
@@ -1945,7 +1981,7 @@ TEST_F(MacroAssemblerTest, I32x4ExtractLane) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 999;
   f.Call(&t);
   CHECK_EQ(999LL, t.extracted);
@@ -1974,7 +2010,7 @@ TEST_F(MacroAssemblerTest, I8x16ExtractLaneS) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 0xFF;  // 255 unsigned = -1 signed when sign-extended from 8 bits
   f.Call(&t);
   CHECK_EQ(-1LL, t.extracted);
@@ -2003,7 +2039,7 @@ TEST_F(MacroAssemblerTest, I16x8ExtractLaneS) {
   using F = void*(void*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  T t;
+  T t = {};
   t.val = 0xFFFF;  // 65535 unsigned = -1 signed when sign-extended from 16 bits
   f.Call(&t);
   CHECK_EQ(-1LL, t.extracted);
@@ -2107,7 +2143,7 @@ TEST_F(MacroAssemblerTest, JumpIfSmi) {
 }
 
 // ---------------------------------------------------------------------------
-// ShiftLeftU32 / ShiftRightU32 with register amount
+// ShiftLeftU32 with register amount
 // ---------------------------------------------------------------------------
 TEST_F(MacroAssemblerTest, ShiftU32RegAmount) {
   auto buffer = AllocateAssemblerBuffer();
@@ -2128,7 +2164,7 @@ TEST_F(MacroAssemblerTest, ShiftU32RegAmount) {
 }
 
 // ---------------------------------------------------------------------------
-// ShiftLeftU64 / ShiftRightU64 with register amount
+// ShiftLeftU64 with register amount
 // ---------------------------------------------------------------------------
 TEST_F(MacroAssemblerTest, ShiftU64RegAmount) {
   auto buffer = AllocateAssemblerBuffer();
@@ -2145,6 +2181,7 @@ TEST_F(MacroAssemblerTest, ShiftU64RegAmount) {
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
   CHECK_EQ(8LL, f.Call(1, 3));
   CHECK_EQ(256LL, f.Call(1, 8));
+  CHECK_EQ(int64_t(1) << 32, f.Call(1, 32));  // shift amount >= 32
 }
 
 // ---------------------------------------------------------------------------
@@ -2254,7 +2291,7 @@ TEST_F(MacroAssemblerTest, SubS64SrcImm) {
 // ---------------------------------------------------------------------------
 // CmpAndSwap (32-bit) / CmpAndSwap64 (64-bit)
 // ---------------------------------------------------------------------------
-TEST_F(MacroAssemblerTest, CmpAndSwapMacro) {
+TEST_F(MacroAssemblerTest, CmpAndSwap) {
   auto buffer = AllocateAssemblerBuffer(8 * KB);
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -2274,7 +2311,7 @@ TEST_F(MacroAssemblerTest, CmpAndSwapMacro) {
   CHECK_EQ(99, mem);
 }
 
-TEST_F(MacroAssemblerTest, CmpAndSwap64Macro) {
+TEST_F(MacroAssemblerTest, CmpAndSwap64) {
   auto buffer = AllocateAssemblerBuffer(8 * KB);
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -2414,7 +2451,7 @@ TEST_F(MacroAssemblerTest, LoadS16Reg) {
 }
 
 // ---------------------------------------------------------------------------
-// ConvertInt64ToDouble / ConvertUnsignedInt64ToDouble
+// ConvertInt64ToDouble
 // ---------------------------------------------------------------------------
 TEST_F(MacroAssemblerTest, ConvertInt64ToDouble) {
   auto buffer = AllocateAssemblerBuffer();
@@ -2439,9 +2476,9 @@ TEST_F(MacroAssemblerTest, ConvertInt64ToDouble) {
 }
 
 // ---------------------------------------------------------------------------
-// ConvertDoubleToInt64 / ConvertDoubleToInt32
+// ConvertDoubleToInt32
 // ---------------------------------------------------------------------------
-TEST_F(MacroAssemblerTest, ConvertDoubleToInt32Macro) {
+TEST_F(MacroAssemblerTest, ConvertDoubleToInt32) {
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -2506,36 +2543,6 @@ TEST_F(MacroAssemblerTest, AddS64MemImm) {
 }
 
 // ---------------------------------------------------------------------------
-// CmpS32(reg, mem) / CmpU32(reg, mem)
-// ---------------------------------------------------------------------------
-TEST_F(MacroAssemblerTest, CmpS32Mem) {
-  auto buffer = AllocateAssemblerBuffer();
-  MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
-                      buffer->CreateView());
-  __ set_root_array_available(false);
-  __ set_abort_hard(true);
-  // r2 = value, r3 = pointer to int32_t
-  // return 1 if r2 == *r3, else 0
-  __ CmpS32(r2, MemOperand(r3, 0));
-  Label eq, done;
-  __ beq(&eq);
-  __ lgfi(r2, Operand(0));
-  __ b(&done);
-  __ bind(&eq);
-  __ lgfi(r2, Operand(1));
-  __ bind(&done);
-  __ Ret();
-  CodeDesc desc;
-  masm.GetCode(isolate(), &desc);
-  buffer->MakeExecutable();
-  using F = int32_t(int32_t, int32_t*);
-  auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
-  int32_t mem = 42;
-  CHECK_EQ(1, f.Call(42, &mem));
-  CHECK_EQ(0, f.Call(99, &mem));
-}
-
-// ---------------------------------------------------------------------------
 // AddU32(dst, src1, src2) — unsigned 3-reg add
 // ---------------------------------------------------------------------------
 TEST_F(MacroAssemblerTest, AddU32ThreeReg) {
@@ -2544,7 +2551,7 @@ TEST_F(MacroAssemblerTest, AddU32ThreeReg) {
                       buffer->CreateView());
   __ set_root_array_available(false);
   __ set_abort_hard(true);
-  // r2 = r2 + r3 (unsigned 32-bit, result zero-extended to 64-bit)
+  // r4 = r2 + r3 (unsigned 32-bit), then moved to r2 as the return value
   __ AddU32(r4, r2, r3);
   __ lgr(r2, r4);
   __ Ret();
@@ -2644,27 +2651,6 @@ TEST_F(MacroAssemblerTest, BitwiseLogical32) {
 }
 
 // ---------------------------------------------------------------------------
-// ShiftLeftS32 / ShiftRightS32 — register-based shifts
-// ---------------------------------------------------------------------------
-TEST_F(MacroAssemblerTest, ShiftS32Reg) {
-  auto buffer = AllocateAssemblerBuffer();
-  MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
-                      buffer->CreateView());
-  __ set_root_array_available(false);
-  __ set_abort_hard(true);
-  // ShiftLeftU32(r2, r2, r3): r2 <<= r3
-  __ ShiftLeftU32(r2, r2, r3);
-  __ Ret();
-  CodeDesc desc;
-  masm.GetCode(isolate(), &desc);
-  buffer->MakeExecutable();
-  using F = uint32_t(uint32_t, uint32_t);
-  auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
-  CHECK_EQ(1U << 3, f.Call(1, 3));
-  CHECK_EQ(8U, f.Call(2, 2));
-}
-
-// ---------------------------------------------------------------------------
 // ShiftRightU32 — logical right shift 32-bit
 // ---------------------------------------------------------------------------
 TEST_F(MacroAssemblerTest, ShiftRightU32Reg) {
@@ -2702,25 +2688,6 @@ TEST_F(MacroAssemblerTest, ShiftRightS32Reg) {
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
   CHECK_EQ(-2, f.Call(-4, 1));  // arithmetic: sign bit preserved
   CHECK_EQ(2, f.Call(8, 2));
-}
-
-// ---------------------------------------------------------------------------
-// ShiftLeftU64 / ShiftRightU64 — 64-bit shifts
-// ---------------------------------------------------------------------------
-TEST_F(MacroAssemblerTest, Shift64) {
-  auto buffer = AllocateAssemblerBuffer();
-  MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
-                      buffer->CreateView());
-  __ set_root_array_available(false);
-  __ set_abort_hard(true);
-  __ ShiftLeftU64(r2, r2, r3);
-  __ Ret();
-  CodeDesc desc;
-  masm.GetCode(isolate(), &desc);
-  buffer->MakeExecutable();
-  using F = uint64_t(uint64_t, uint64_t);
-  auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
-  CHECK_EQ(uint64_t(1) << 32, f.Call(1, 32));
 }
 
 // ---------------------------------------------------------------------------
@@ -3799,7 +3766,7 @@ TEST_F(MacroAssemblerTest, CompareLogicalCharTest) {
     char a[8];
     char b[8];
     int64_t result;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -3822,13 +3789,13 @@ TEST_F(MacroAssemblerTest, CompareLogicalCharTest) {
   // Equal
   memcpy(t.a, "ABCD    ", 8);
   memcpy(t.b, "ABCD    ", 8);
-  t.result = 0;
+  t.result = -1;
   f.Call(&t);
   CHECK_EQ(1, t.result);
 
   // Not equal
   memcpy(t.b, "ABCE    ", 8);
-  t.result = 0;
+  t.result = -1;
   f.Call(&t);
   CHECK_EQ(0, t.result);
 }
@@ -3900,7 +3867,7 @@ TEST_F(MacroAssemblerTest, ConvertDoubleToUnsigned) {
     double input;
     uint32_t out32;
     uint64_t out64;
-  } t;
+  } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -3918,15 +3885,24 @@ TEST_F(MacroAssemblerTest, ConvertDoubleToUnsigned) {
   using F = void(T*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  t.input = 42.9;  f.Call(&t);
+  t.input = 42.9;
+  t.out32 = UINT32_MAX;
+  t.out64 = UINT64_MAX;
+  f.Call(&t);
   CHECK_EQ(42u, t.out32);
   CHECK_EQ(42ull, t.out64);
 
-  t.input = 0.0;  f.Call(&t);
+  t.input = 0.0;
+  t.out32 = UINT32_MAX;
+  t.out64 = UINT64_MAX;
+  f.Call(&t);
   CHECK_EQ(0u, t.out32);
   CHECK_EQ(0ull, t.out64);
 
-  t.input = 1000000.7;  f.Call(&t);
+  t.input = 1000000.7;
+  t.out32 = UINT32_MAX;
+  t.out64 = UINT64_MAX;
+  f.Call(&t);
   CHECK_EQ(1000000u, t.out32);
   CHECK_EQ(1000000ull, t.out64);
 }
@@ -3935,7 +3911,7 @@ TEST_F(MacroAssemblerTest, ConvertDoubleToUnsigned) {
 // ConvertFloat32ToInt64
 // ---------------------------------------------------------------------------
 TEST_F(MacroAssemblerTest, ConvertFloat32ToInt64) {
-  struct T { float input; int64_t output; } t;
+  struct T { float input; int64_t output; } t = {};
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate(), AssemblerOptions{}, CodeObjectRequired{false},
                       buffer->CreateView());
@@ -3951,10 +3927,11 @@ TEST_F(MacroAssemblerTest, ConvertFloat32ToInt64) {
   using F = void(T*);
   auto f = GeneratedCode<F>::FromBuffer(isolate(), buffer->start());
 
-  t.input = 3.9f;    f.Call(&t); CHECK_EQ(3LL, t.output);
-  t.input = -7.1f;   f.Call(&t); CHECK_EQ(-7LL, t.output);
-  t.input = 1e10f;   f.Call(&t); CHECK_EQ(10000000000LL, t.output);
-  t.input = 0.0f;    f.Call(&t); CHECK_EQ(0LL, t.output);
+  t.input = 3.9f; t.output = INT64_MIN; f.Call(&t); CHECK_EQ(3LL, t.output);
+  t.input = -7.1f; t.output = INT64_MIN; f.Call(&t); CHECK_EQ(-7LL, t.output);
+  t.input = 1e10f; t.output = INT64_MIN; f.Call(&t);
+  CHECK_EQ(10000000000LL, t.output);
+  t.input = 0.0f; t.output = INT64_MIN; f.Call(&t); CHECK_EQ(0LL, t.output);
 }
 
 // ---------------------------------------------------------------------------
