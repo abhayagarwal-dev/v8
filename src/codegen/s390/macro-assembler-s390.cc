@@ -4062,7 +4062,9 @@ void MacroAssembler::LoadF64(DoubleRegister dst, const MemOperand& mem) {
 // Load Single Precision (32-bit) Floating Point number from memory
 void MacroAssembler::LoadF32(DoubleRegister dst, const MemOperand& mem) {
   if (is_uint12(mem.offset())) {
-    le_z(dst, mem);
+    // LDE zeroes the remaining 32 bits of the FPR, which breaks the dependency
+    // on the previous register contents (unlike LE).
+    lde(dst, mem);
   } else {
     DCHECK(is_int20(mem.offset()));
     ley(dst, mem);

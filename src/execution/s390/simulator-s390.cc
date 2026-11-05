@@ -1539,6 +1539,7 @@ void Simulator::EvalTableInit() {
   EvalTable[CGRB] = &Simulator::Evaluate_CGRB;
   EvalTable[CGIB] = &Simulator::Evaluate_CGIB;
   EvalTable[CIB] = &Simulator::Evaluate_CIB;
+  EvalTable[LDE] = &Simulator::Evaluate_LDE;
   EvalTable[LDEB] = &Simulator::Evaluate_LDEB;
   EvalTable[LXDB] = &Simulator::Evaluate_LXDB;
   EvalTable[LXEB] = &Simulator::Evaluate_LXEB;
@@ -11036,6 +11037,20 @@ EVALUATE(CIB) {
   UNIMPLEMENTED();
   USE(instr);
   return 0;
+}
+
+EVALUATE(LDE) {
+  DCHECK_OPCODE(LDE);
+  DECODE_RXE_INSTRUCTION(r1, b2, x2, d2);
+  int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+  int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+  intptr_t addr = b2_val + x2_val + d2;
+  float fval = ReadFloat(addr);
+  // Clear the whole 64-bit FPR, then write the short value into its leftmost
+  // 32 bits
+  set_fpr<uint64_t>(r1, 0);
+  set_fpr<float>(r1, fval);
+  return length;
 }
 
 EVALUATE(LDEB) {

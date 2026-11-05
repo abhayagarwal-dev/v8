@@ -1224,6 +1224,7 @@ class Simulator : public SimulatorBase {
   EVALUATE(CGRB);
   EVALUATE(CGIB);
   EVALUATE(CIB);
+  EVALUATE(LDE);
   EVALUATE(LDEB);
   EVALUATE(LXDB);
   EVALUATE(LXEB);
